@@ -1,0 +1,304 @@
+---
+title: 'Homework 1: Nguyen, Alexandria'
+author: "Alexandria Nguyen"
+date: "August 5, 2015"
+output: html_document
+---
+
+##### Libraries used:  
+library(MASS)  
+library(dichromat)  
+library(mosaic)  
+library(fImport)  
+library(foreach)  
+library(PerformanceAnalytics)  
+library(ggplot2)  
+library(flexclust)  
+
+## Exploratory Analysis
+### Exploring undercount, where undercount is defined as less votes counted per ballot cast:  
+```{r, echo=FALSE}
+library(MASS)  
+library(dichromat)  
+library(mosaic)  
+library(fImport)  
+library(foreach)  
+library(PerformanceAnalytics)  
+library(ggplot2)  
+library(flexclust)  
+georgia2000 <- read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/georgia2000.csv", row.names=1)
+```
+
+### Determining undercount, where undercount is the amount of votes counted less than ballots were cast.
+```{r}
+plot(georgia2000$ballots, georgia2000$votes, type="p", xlim=c(0,90000), 
+     ylim=c(0,90000), xlab="ballots", ylab="votes", 
+     main="Votes Counted per Ballots Cast")  
+fit <- lm(georgia2000$votes ~ georgia2000$ballots)
+abline(fit)
+summary(fit)
+```
+The correlation between ballots cast and votes counted in georgia2000 is 0.966865, almost perfect. For every ballot cast, approximately 35 votes were not counted. While this does represent undercount, it does not seem significant in the grand scheme of things.  
+
+
+### Exploring the relationship between voting equipment and voters from poor counties:  
+```{r, echo=FALSE}
+spineplot(georgia2000$poor, georgia2000$equip, col=dichromat(rainbow(4), "tritan"),
+          xlab="Non-Poor(0), Poor(1)", ylab="Voting Equipment", 
+          main="Equipment Used by Non-Poor and Poor Voters")
+```
+Over 60% of people from poor counties voted using levers. But is this significant? Is there a correlation between equipment used and undercount? If so, does this disproportionately affect poor people's votes?  
+
+### Correlations between equipment and undercount:  
+```{r}
+papersub <- subset(georgia2000, equip=="PAPER")
+papercor <- cor(papersub$ballots, papersub$votes)
+papercor
+punchsub <- subset(georgia2000, equip=="PUNCH")
+punchcor <- cor(punchsub$ballots, punchsub$votes)
+punchcor
+leversub <- subset(georgia2000, equip=="LEVER")
+levercor <- cor(leversub$ballots, leversub$votes)
+levercor
+opticalsub <- subset(georgia2000, equip=="OPTICAL")
+opticalcor <- cor(opticalsub$ballots, opticalsub$votes)
+opticalcor
+```
+All correlations are close to one, which means there's not a strong correlation between voting equipment and undercount. Somewhat interestingly, paper is the most accurate voting equipment.  
+
+
+## Bootstrapping
+```{r, echo=FALSE}
+myETFs = c("SPY", "TLT", "LQD", "EEM", "VNQ")
+myprices = yahooSeries(myETFs, from='2010-01-01', to='2015-07-30')
+
+#### Calculate percent returns from a Yahoo Series
+YahooPricesToReturns = function(series) {
+  mycols = grep('Adj.Close', colnames(series))
+  closingprice = series[,mycols]
+  N = nrow(closingprice)
+  percentreturn = as.data.frame(closingprice[2:N,]) / as.data.frame(closingprice[1:(N-1),]) - 1
+  mynames = strsplit(colnames(percentreturn), '.', fixed=TRUE)
+  mynames = lapply(mynames, function(x) return(paste0(x[1], ".PctReturn")))
+  colnames(percentreturn) = mynames
+  as.matrix(na.omit(percentreturn))
+}
+#### Returns from closing prices
+myreturns = YahooPricesToReturns(myprices)
+```
+
+### Ascertain Risk per ETF using Annualized Returns  
+```{r}
+Return.annualized(myreturns, scale = 1, geometric = FALSE)
+```
+The higher the return percentage is, the higer the risk. Thusly, VNQ is deemed the most risky, and EEM, the least.
+
+
+
+Portfolio A is evenly divided among the five ETFs. I chose to split investments in Portfolio B (30%, 30%, and 40%) focusing on the three ETFs with the highest annualized returns under the assumption that reallocating investments from LQD and EEM to the other three ETFs with higher returns would be safer investments.  
+
+###Returns for All Five ETFs Weighted Equally
+```{r, echo=FALSE}
+##Compute the moments of a one-day change in your portfolio
+totalwealth = 100000
+weights = c(0.2, 0.2, 0.2, 0.2, 0.2) 	
+
+##Money in each stock?
+holdings = weights * totalwealth
+
+#### BOOTSTRAP
+return.today = resample(myreturns, 1, orig.ids=FALSE)
+
+# Update the value of your holdings
+total_wealth = 100000
+holdings = total_wealth*c(0.2,0.2,0.2, 0.2, 0.2)
+holdings = holdings + holdings*return.today
+
+# Compute your new total wealth
+totalwealth = sum(holdings)
+
+
+# Now loop over four trading weeks
+totalwealth = 100000
+weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+holdings = weights * totalwealth
+n_days = 20
+wealthtracker = rep(0, n_days)
+set.seed(19)
+for(today in 1:n_days) {
+  return.today = resample(myreturns, 1, orig.ids=FALSE)
+  holdings = holdings + holdings*return.today
+  totalwealth = sum(holdings)
+  wealthtracker[today] = totalwealth
+}
+totalwealth
+plot(wealthtracker, type='l', xlab="days", 
+     main="Gains and Losses over Four Trading Weeks")
+```
+
+###PORTFOLIO A Simulation
+```{r}
+simA = foreach(i=1:5000, .combine='rbind') %do% {
+  totalwealth = 100000
+  weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+  holdings = weights * totalwealth
+  wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+  for(today in 1:n_days) {
+    return.today = resample(myreturns, 1, orig.ids=FALSE)
+    holdings = holdings + holdings*return.today
+    totalwealth = sum(holdings)
+    wealthtracker[today] = totalwealth
+  }
+  wealthtracker
+}
+
+head(simA)
+hist(simA[,n_days], 25)
+
+##PORTFOLIO A Profit/loss
+hist(simA[,n_days]- 100000, xlab="Gains and Losses", ylab="Frequency", 
+     main="Portfolio A: Gains and Losses", 25)
+
+##PORTFOLIO A Value at 5% Risk
+quantile(simA[,n_days], 0.05) - 100000
+```
+
+
+
+###PORTFOLIO B Simulation
+```{r}
+simB = foreach(i=1:5000, .combine='rbind') %do% {
+  totalwealth = 100000
+  weights = c(0.3, 0.3, 0, 0, 0.4)
+  holdings = weights * totalwealth
+  wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+  for(today in 1:n_days) {
+    return.today = resample(myreturns, 1, orig.ids=FALSE)
+    holdings = holdings + holdings*return.today
+    totalwealth = sum(holdings)
+    wealthtracker[today] = totalwealth
+  }
+  wealthtracker
+}
+
+head(simB)
+hist(simB[,n_days], 25)
+
+##PORTFOLIO B Profit/loss
+hist(simB[,n_days]- 100000, xlab="Gains and Losses", ylab="Frequency", 
+     main="Portfolio B: Gains and Losses", 25)
+
+##PORTFOLIO B Value at 5% Risk
+quantile(simB[,n_days], 0.05) - 100000
+```
+
+
+###PORTFOLIO C Simulation
+```{r}
+simC = foreach(i=1:5000, .combine='rbind') %do% {
+  totalwealth = 100000
+  weights = c(0.5, 0, 0, 0, 0.5)
+  holdings = weights * totalwealth
+  wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+  for(today in 1:n_days) {
+    return.today = resample(myreturns, 1, orig.ids=FALSE)
+    holdings = holdings + holdings*return.today
+    totalwealth = sum(holdings)
+    wealthtracker[today] = totalwealth
+  }
+  wealthtracker
+}
+
+head(simC)
+hist(simC[,n_days], 25)
+
+##PORTFOLIO C Profit/loss
+hist(simC[,n_days]- 100000, xlab="Gains and Losses", ylab="Frequency", 
+     main="Portfolio C: Gains and Losses", 25)
+
+##PORTFOLIO C Value at 5% Risk
+quantile(simC[,n_days], 0.05) - 100000
+```
+
+####All 3 Portfolios' Values at 5% Risk
+```{r, echo=FALSE}
+quantile(simA[,n_days], 0.05) - 100000
+quantile(simB[,n_days], 0.05) - 100000
+quantile(simC[,n_days], 0.05) - 100000
+```
+
+
+## Clustering and PCA
+```{r}
+wine <- read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/wine.csv")
+summary(wine)
+names(wine)
+```
+
+```{r, echo=FALSE}
+Z = wine[,1:11]
+pairs(Z)
+pc1 = prcomp(Z, scale.=TRUE)
+
+####Basic plotting and summary methods  
+pc1
+plot(pc1)
+biplot(pc1)
+
+
+wine_scaled <- scale(Z, center=TRUE, scale=TRUE) 
+wine_distance_matrix = dist(wine_scaled, method='euclidean')
+
+
+####Hierarchical clustering
+hier_wine = hclust(wine_distance_matrix, method='average')
+
+####Plot the dendrogram
+plot(hier_wine, cex=2)
+```
+This dendrogram is too noisy to add value.
+
+```{r}
+#####Cut the tree into 5 clusters
+cluster1 = cutree(hier_wine, k=5)
+summary(factor(cluster1))
+```
+
+```{r, echo=FALSE}
+####Examine the cluster members
+which(cluster1 == 1)
+which(cluster1 == 2)
+which(cluster1 == 3)
+
+####Using single linkage instead
+hier_wine2 = hclust(wine_distance_matrix, method='single')
+
+
+####Plot the dendrogram
+plot(hier_wine2, cex=2)
+cluster2 = cutree(hier_wine2, k=5)
+summary(factor(cluster2))
+```
+I'm having a hard time getting clustering down. 
+
+
+## Market Segmentation
+```{r, echo=FALSE}
+s_m <- read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/social_marketing.csv", row.names=1)
+summary(s_m)
+names(s_m)
+head(s_m)
+```
+
+```{r}
+s_m_scaled <- scale(s_m, center=TRUE, scale=TRUE)
+cluster_education <- kmeans(s_m_scaled[,c("college_uni", "school")], centers=3)
+  .
+
+# Plot with labels
+# type = 'n' just sets up the axes
+plot(s_m_scaled[,"school"], s_m_scaled[,"college_uni"], type="n", xlab="School", 
+     ylab="College_Uni")  
+text(s_m_scaled[,"school"], s_m_scaled[,"college_uni"], labels=rownames(s_m), 
+     col=dichromat(rainbow(3), "tritan")[cluster_education$cluster])
+```
